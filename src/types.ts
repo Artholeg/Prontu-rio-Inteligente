@@ -120,6 +120,11 @@ export interface ExpandedObsData {
   tirTPO: string;
   peAlto: string[];
   peMod: string[];
+  // Risk Stratification
+  socioeconomicRisk: string[];
+  previousReproductiveRisk: string[];
+  currentObstetricRisk: string[];
+  previousClinicalRisk: string[];
 }
 
 export interface ExpandedCvData {
@@ -139,4 +144,6 @@ export interface ExpandedCvData {
   fc: string;
   riskPct: string;
   agravantes: string[];
+  age?: string;
+  sex?: string;
 }

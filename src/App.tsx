@@ -37,6 +37,16 @@ import {
   ExpandedObsData,
   ExpandedCvData
 } from './types';
+import { 
+  GESTATIONAL_RISK_FACTORS, 
+  RiskFactor 
+} from './constants/gestationalRisks';
+
+const Badge = ({ label, color }: { label: string, color: string }) => (
+  <span className={cn("px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider", color)}>
+    {label}
+  </span>
+);
 import { analyzeClinicalText, checkInteractions, runAudit, searchCodes, generateSummary } from './services/aiService';
 import { calcFramingham, calcObstetricIG, calcMaternalRisk } from './services/clinicalCalculators';
 import jsPDF from 'jspdf';
@@ -66,12 +76,14 @@ const initialHebiatria: HebiatriaData = {
 const initialExpandedObs: ExpandedObsData = {
   dum: '', usgDate: '', usg1TrimDate: '', usg1TrimSem: '', usg1TrimDias: '', usgSem: '', usgDias: '', g: '', p: '', a: '', c: '', afu: '', bcf: '', movFetal: '', edema: '',
   preWeight: '', gestWeight: '', altura: '', gemelar: 'N', hb: '', ht: '', triAnemia: '', glicemia: '',
-  tirTri: '', tirTSH: '', tirT4L: '', tirTPO: '', peAlto: [], peMod: []
+  tirTri: '', tirTSH: '', tirT4L: '', tirTPO: '', peAlto: [], peMod: [],
+  socioeconomicRisk: [], previousReproductiveRisk: [], currentObstetricRisk: [], previousClinicalRisk: []
 };
 
 const initialExpandedCv: ExpandedCvData = {
   ct: '', hdl: '', ldl: '', tg: '', hba1c: '', glicemia: '', creatinina: '', tfg: '', pas: '', pad: '',
-  tabagismo: '0', dm: '0', antiHAS: '0', fc: '', riskPct: '', agravantes: []
+  tabagismo: '0', dm: '0', antiHAS: '0', fc: '', riskPct: '', agravantes: [],
+  age: '', sex: ''
 };
 
 import { 
@@ -528,16 +540,49 @@ export default function App() {
     return null;
   })() : null;
 
-  const maternalRisk = state.obsData ? calcMaternalRisk({
-    age: parseInt(state.patient.age) || 0,
-    g: parseInt(state.obsData.g) || 0,
-    p: parseInt(state.obsData.p) || 0,
-    a: parseInt(state.obsData.a) || 0,
-    c: parseInt(state.obsData.c) || 0,
-    hb: parseFloat(state.obsData.hb) || 0,
-    glicemia: parseFloat(state.obsData.glicemia) || 0,
-    gemelar: state.obsData.gemelar === 'S'
-  }) : null;
+  const gestationalRisk = (() => {
+    if (!state.obsData) return { score: 0, level: 'Baixo', flow: 'APS' };
+    
+    const selectedIds = [
+      ...(state.obsData.socioeconomicRisk || []),
+      ...(state.obsData.previousReproductiveRisk || []),
+      ...(state.obsData.currentObstetricRisk || []),
+      ...(state.obsData.previousClinicalRisk || [])
+    ];
+
+    let score = 0;
+    selectedIds.forEach(id => {
+      const factor = GESTATIONAL_RISK_FACTORS.find(f => f.id === id);
+      if (factor) score += factor.score;
+    });
+
+    // Special case: Obesidade Grau 3 is direct high risk
+    if (state.obsData.socioeconomicRisk?.includes('obesity_g3')) score = Math.max(score, 10);
+
+    let level: 'Baixo' | 'Médio' | 'Alto' = 'Baixo';
+    let flow = 'APS';
+
+    if (score >= 10) {
+      level = 'Alto';
+      flow = 'Especializado + APS';
+    } else if (score >= 5) {
+      level = 'Médio';
+      flow = 'APS + Especializado';
+    } else {
+      level = 'Baixo';
+      flow = 'APS';
+    }
+
+    return { score, level, flow };
+  })();
+
+  const toggleRiskFactor = (category: keyof ExpandedObsData, factorId: string) => {
+    const current = (state.obsData?.[category] as string[]) || [];
+    const updated = current.includes(factorId)
+      ? current.filter(id => id !== factorId)
+      : [...current, factorId];
+    updateObsData(category, updated);
+  };
 
   // Puericultura Derived State
   const pueriAgeM = state.puericultura?.dob && state.patient.date ? (() => {
@@ -869,17 +914,42 @@ export default function App() {
                 placeholder="Conduta terapêutica e orientações..."
               />
               {interactions && interactions.interactions?.length > 0 && (
-                <div className="mt-4 p-4 bg-amber-500/5 border border-amber-500/20 rounded-xl space-y-3">
+                <div className="mt-4 p-4 bg-amber-500/5 border border-amber-500/20 rounded-xl space-y-4">
                   <h4 className="text-[10px] font-bold uppercase tracking-wider text-amber-600 flex items-center gap-2">
                     <AlertTriangle size={12} /> Interações Detectadas
                   </h4>
-                  {interactions.interactions.map((inter: any, idx: number) => (
-                    <div key={idx} className="text-xs space-y-1">
-                      <p className="font-bold">{inter.drug1} + {inter.drug2} ({inter.severity})</p>
-                      <p className="text-muted">{inter.effect}</p>
-                      <p className="text-amber-700 font-medium italic">{inter.recommendation}</p>
-                    </div>
-                  ))}
+                  <div className="grid grid-cols-1 gap-4">
+                    {interactions.interactions.map((inter: any, idx: number) => (
+                      <div key={idx} className="p-3 bg-surf border border-amber-500/10 rounded-lg space-y-2">
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs font-bold">{inter.drug1} + {inter.drug2}</p>
+                          <Badge 
+                            label={inter.severity.toUpperCase()} 
+                            color={
+                              inter.severity === 'bloqueio' ? 'bg-rose-500 text-white' :
+                              inter.severity === 'grave' ? 'bg-orange-500 text-white' :
+                              inter.severity === 'moderada' ? 'bg-amber-500 text-white' :
+                              'bg-blue-500 text-white'
+                            } 
+                          />
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-[11px]">
+                          <div>
+                            <span className="font-bold text-dim uppercase text-[9px]">Efeito:</span>
+                            <p className="text-muted">{inter.effect}</p>
+                          </div>
+                          <div>
+                            <span className="font-bold text-dim uppercase text-[9px]">Mecanismo:</span>
+                            <p className="text-muted">{inter.mechanism}</p>
+                          </div>
+                        </div>
+                        <div className="pt-2 border-t border-amber-500/10">
+                          <span className="font-bold text-amber-700 uppercase text-[9px]">Recomendação:</span>
+                          <p className="text-amber-800 font-medium italic">{inter.recommendation}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
               <AiSuggestions suggestions={aiSuggestions.p} onAdd={addCode} />
@@ -993,6 +1063,27 @@ export default function App() {
                 <Activity size={18} /> Risco Cardiovascular (Framingham + SCORE2)
               </h3>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono uppercase tracking-wider text-dim">Idade (Anos)</label>
+                  <input 
+                    type="number"
+                    value={state.cvData?.age || state.patient.age.replace(/\D/g, '')}
+                    onChange={e => updateCvData('age', e.target.value)}
+                    className="w-full bg-transparent border-b-2 border-surf-3 focus:border-rose-500 outline-none py-1 text-sm transition-colors"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono uppercase tracking-wider text-dim">Sexo</label>
+                  <select 
+                    value={state.cvData?.sex || state.patient.sex}
+                    onChange={e => updateCvData('sex', e.target.value)}
+                    className="w-full bg-transparent border-b-2 border-surf-3 focus:border-rose-500 outline-none py-1 text-sm transition-colors"
+                  >
+                    <option value="">—</option>
+                    <option value="M">Masculino</option>
+                    <option value="F">Feminino</option>
+                  </select>
+                </div>
                 <Input label="Colesterol Total" value={state.cvData?.ct || ''} onChange={v => updateCvData('ct', v)} />
                 <Input label="HDL" value={state.cvData?.hdl || ''} onChange={v => updateCvData('hdl', v)} />
                 <Input label="LDL" value={state.cvData?.ldl || ''} onChange={v => updateCvData('ldl', v)} />
@@ -1024,19 +1115,37 @@ export default function App() {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {cvRisk !== null && (
-                  <div className="p-4 bg-rose-500/5 border border-rose-500/20 rounded-xl flex items-center justify-between">
-                    <div className="flex flex-col">
-                      <span className="text-[10px] font-mono uppercase text-dim">Framingham (2008)</span>
-                      <span className="text-sm font-medium">Risco DCV em 10 anos:</span>
-                    </div>
-                    <span className="text-2xl font-serif font-bold text-rose-500">{cvRisk.toFixed(1)}%</span>
-                  </div>
-                )}
                 {(() => {
+                  const age = parseInt(state.cvData?.age || state.patient.age.replace(/\D/g, ''));
+                  const sex = state.cvData?.sex || state.patient.sex;
+                  const risk = age && sex && state.cvData?.ct && state.cvData?.hdl && state.cvData?.pas ? 
+                    calcFramingham({
+                      age,
+                      sex: sex as 'M' | 'F',
+                      ct: parseFloat(state.cvData.ct),
+                      hdl: parseFloat(state.cvData.hdl),
+                      pas: parseFloat(state.cvData.pas),
+                      isSmoker: state.cvData.tabagismo === '1',
+                      isDM: state.cvData.dm === '1',
+                      isTreated: state.cvData.antiHAS === '1'
+                    }) : null;
+                  
+                  return risk !== null && (
+                    <div className="p-4 bg-rose-500/5 border border-rose-500/20 rounded-xl flex items-center justify-between">
+                      <div className="flex flex-col">
+                        <span className="text-[10px] font-mono uppercase text-dim">Framingham (2008)</span>
+                        <span className="text-sm font-medium">Risco DCV em 10 anos:</span>
+                      </div>
+                      <span className="text-2xl font-serif font-bold text-rose-500">{risk.toFixed(1)}%</span>
+                    </div>
+                  );
+                })()}
+                {(() => {
+                  const age = parseInt(state.cvData?.age || state.patient.age.replace(/\D/g, ''));
+                  const sex = state.cvData?.sex || state.patient.sex;
                   const s2 = calcSCORE2(
-                    parseInt(state.patient.age),
-                    state.patient.sex,
+                    age,
+                    sex,
                     parseFloat(state.cvData?.pas || '0'),
                     parseFloat(state.cvData?.ct || '0'),
                     state.cvData?.tabagismo === '1',
@@ -1057,30 +1166,32 @@ export default function App() {
                 })()}
               </div>
 
-              {state.cvData?.creatinina && state.patient.age && state.patient.sex && (
-                <div className="p-4 bg-blue-500/5 border border-blue-500/20 rounded-xl flex items-center justify-between">
-                  <div className="flex flex-col">
-                    <span className="text-[10px] font-mono uppercase text-dim">CKD-EPI 2021</span>
-                    <span className="text-sm font-medium">TFG Estimada:</span>
-                  </div>
-                  <span className="text-2xl font-serif font-bold text-blue-500">
-                    {calcCKDEPI2021(parseFloat(state.cvData.creatinina), parseInt(state.patient.age), state.patient.sex)} mL/min
-                  </span>
-                </div>
-              )}
-            </div>
-          </div>
-        </section>
-
-        {/* Section 05: Gestational */}
+              {(() => {
+                const age = parseInt(state.cvData?.age || state.patient.age.replace(/\D/g, ''));
+                const sex = state.cvData?.sex || state.patient.sex;
+                const creat = parseFloat(state.cvData?.creatinina || '0');
+                const tfg = (creat && age && sex) ? calcCKDEPI2021(creat, age, sex) : null;
+                
+                return tfg !== null && (
+                  <div className="p-4 bg-blue-500/5 border border-blue-500/20 rounded-xl flex items-center justify-between">
+                    <div className="flex flex-col">
+                      <span className="text-[10px] font-mono uppercase text-dim">CKD-EPI 2021</span>
+                      <span className="text-sm font-medium">TFG Estimada:</span>
+                    </div>
+                    <span className="text-2xl font-serif font-bold text-blue-500">
+                      {tfg} mL/min
+                    </span>
+                        {/* Section 05: Gestational */}
         <section id="gestacional" className="space-y-6 scroll-mt-24">
           <SectionHeader num="05" title="Risco Gestacional" subtitle="Estratificação SES/SC 2022" />
-          <div className="bg-surf border border-border rounded-2xl p-8 shadow-sm space-y-8">
-            <div className="space-y-4">
-              <h3 className="text-sm font-bold flex items-center gap-2 text-o-clr">
-                <Activity size={18} /> Avaliação Obstétrica
+          <div className="bg-surf border border-border rounded-2xl p-8 shadow-sm space-y-10">
+            
+            {/* Sub-seção: Gestação */}
+            <div className="space-y-6">
+              <h3 className="text-sm font-bold flex items-center gap-2 text-rose-500 border-b border-rose-100 pb-2">
+                <Baby size={18} /> Gestação
               </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <Input label="DUM" type="date" value={state.obsData?.dum || ''} onChange={v => updateObsData('dum', v)} />
                 <div className="grid grid-cols-3 gap-2">
                   <div className="col-span-1">
@@ -1143,68 +1254,236 @@ export default function App() {
                   </div>
                 </div>
               )}
+            </div>
 
-              {maternalRisk && (
-                <div className={cn(
-                  "p-4 border rounded-xl space-y-3",
-                  maternalRisk.level === 'Alto' ? "bg-rose-500/5 border-rose-500/20" :
-                  maternalRisk.level === 'Intermediário' ? "bg-amber-500/5 border-amber-500/20" :
-                  "bg-green-500/5 border-green-500/20"
-                )}>
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <AlertTriangle size={18} className={cn(
-                        maternalRisk.level === 'Alto' ? "text-rose-500" :
-                        maternalRisk.level === 'Intermediário' ? "text-amber-500" :
-                        "text-green-500"
-                      )} />
-                      <span className="text-sm font-bold uppercase tracking-wider">Estratificação de Risco Materno</span>
-                    </div>
-                    <span className={cn(
-                      "px-3 py-1 rounded-full text-xs font-bold uppercase",
-                      maternalRisk.level === 'Alto' ? "bg-rose-500 text-white" :
-                      maternalRisk.level === 'Intermediário' ? "bg-amber-500 text-white" :
-                      "bg-green-500 text-white"
-                    )}>
-                      Risco {maternalRisk.level}
-                    </span>
+            {/* Sub-seção: Anemia */}
+            <div className="space-y-6 pt-6 border-t border-surf-3">
+              <h3 className="text-sm font-bold flex items-center gap-2 text-rose-500 border-b border-rose-100 pb-2">
+                🩸 Anemia
+              </h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <Input label="Hb (g/dL)" value={state.obsData?.hb || ''} onChange={v => updateObsData('hb', v)} />
+                <Input label="Ht (%)" value={state.obsData?.ht || ''} onChange={v => updateObsData('ht', v)} />
+                <div className="space-y-1 col-span-2">
+                  <label className="text-[10px] font-mono uppercase tracking-wider text-dim">Triagem Anemia</label>
+                  <textarea 
+                    value={state.obsData?.triAnemia || ''} 
+                    onChange={e => updateObsData('triAnemia', e.target.value)}
+                    className="w-full bg-transparent border-b-2 border-surf-3 focus:border-rose-500 outline-none py-1 text-sm transition-colors min-h-[40px]"
+                    placeholder="Observações sobre anemia..."
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Sub-seção: Doença Tireoidiana */}
+            <div className="space-y-6 pt-6 border-t border-surf-3">
+              <h3 className="text-sm font-bold flex items-center gap-2 text-rose-500 border-b border-rose-100 pb-2">
+                🦋 Doença Tireoidiana
+              </h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <Input label="TSH (mUI/L)" value={state.obsData?.tirTSH || ''} onChange={v => updateObsData('tirTSH', v)} />
+                <Input label="T4 Livre" value={state.obsData?.tirT4L || ''} onChange={v => updateObsData('tirT4L', v)} />
+                <Input label="Anti-TPO" value={state.obsData?.tirTPO || ''} onChange={v => updateObsData('tirTPO', v)} />
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono uppercase tracking-wider text-dim">Triagem Tireoide</label>
+                  <select value={state.obsData?.tirTri} onChange={e => updateObsData('tirTri', e.target.value)} className="w-full bg-transparent border-b-2 border-surf-3 py-1 text-sm">
+                    <option value="">Selecione</option>
+                    <option value="Normal">Normal</option>
+                    <option value="Hipotireoidismo">Hipotireoidismo</option>
+                    <option value="Hipertireoidismo">Hipertireoidismo</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Sub-seção: Risco de Pré-eclâmpsia */}
+            <div className="space-y-6 pt-6 border-t border-surf-3">
+              <h3 className="text-sm font-bold flex items-center gap-2 text-rose-500 border-b border-rose-100 pb-2">
+                ⚡ Risco de Pré-eclâmpsia
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div className="space-y-3">
+                  <h5 className="text-[9px] font-bold uppercase text-rose-500">Alto Risco (1+ fator)</h5>
+                  <div className="space-y-2">
+                    {[
+                      'Doença hipertensiva em gestação anterior',
+                      'Doença renal crônica',
+                      'Doença autoimune (LES ou SAF)',
+                      'Diabetes mellitus tipo 1 ou 2',
+                      'Hipertensão crônica'
+                    ].map(f => (
+                      <label key={f} className="flex items-center gap-2 text-xs cursor-pointer group">
+                        <input 
+                          type="checkbox" 
+                          checked={state.obsData?.peAlto.includes(f)}
+                          onChange={() => {
+                            const current = state.obsData?.peAlto || [];
+                            const updated = current.includes(f) ? current.filter(x => x !== f) : [...current, f];
+                            updateObsData('peAlto', updated);
+                          }}
+                          className="rounded border-surf-3 text-rose-500 focus:ring-rose-500"
+                        />
+                        <span className="group-hover:text-rose-600 transition-colors">{f}</span>
+                      </label>
+                    ))}
                   </div>
-                  
-                  {maternalRisk.factors.length > 0 ? (
-                    <div className="flex flex-wrap gap-2">
-                      {maternalRisk.factors.map((f, i) => (
-                        <span key={i} className="text-[10px] px-2 py-0.5 bg-white/50 border border-border rounded-md text-dim">
-                          • {f}
-                        </span>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-dim italic">Nenhum fator de risco identificado pelos critérios básicos.</p>
-                  )}
+                </div>
+                <div className="space-y-3">
+                  <h5 className="text-[9px] font-bold uppercase text-amber-500">Risco Moderado (2+ fatores)</h5>
+                  <div className="space-y-2">
+                    {[
+                      'Primigravidez',
+                      'Idade ≥ 35 anos',
+                      'Intervalo interpartal > 10 anos',
+                      'IMC ≥ 30 kg/m² na primeira consulta',
+                      'História familiar de pré-eclâmpsia',
+                      'Gestação múltipla'
+                    ].map(f => (
+                      <label key={f} className="flex items-center gap-2 text-xs cursor-pointer group">
+                        <input 
+                          type="checkbox" 
+                          checked={state.obsData?.peMod.includes(f)}
+                          onChange={() => {
+                            const current = state.obsData?.peMod || [];
+                            const updated = current.includes(f) ? current.filter(x => x !== f) : [...current, f];
+                            updateObsData('peMod', updated);
+                          }}
+                          className="rounded border-surf-3 text-amber-500 focus:ring-amber-500"
+                        />
+                        <span className="group-hover:text-amber-600 transition-colors">{f}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              {((state.obsData?.peAlto.length || 0) >= 1 || (state.obsData?.peMod.length || 0) >= 2) && (
+                <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-lg text-rose-700 text-xs font-medium">
+                  Indicação de AAS (100-150mg/dia) e Cálcio (1,5-2g/dia) antes de 16 semanas.
                 </div>
               )}
+            </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8 pt-4 border-t border-border">
-                <div className="space-y-4">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-dim">🩸 Anemia & Glicemia</h4>
-                  <div className="grid grid-cols-2 gap-4">
-                    <Input label="Hb (g/dL)" value={state.obsData?.hb || ''} onChange={v => updateObsData('hb', v)} />
-                    <Input label="Ht (%)" value={state.obsData?.ht || ''} onChange={v => updateObsData('ht', v)} />
-                    <Input label="Glicemia Jejum" value={state.obsData?.glicemia || ''} onChange={v => updateObsData('glicemia', v)} />
+            {/* Estratificação de Risco Gestacional (Baseado nas Imagens) */}
+            <div className="space-y-6 pt-6 border-t border-surf-3">
+              <h3 className="text-sm font-bold flex items-center gap-2 text-rose-500 border-b border-rose-100 pb-2">
+                📊 Estratificação de Risco Gestacional
+              </h3>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                {/* Coluna 1: Socioeconômico e Reprodutivo */}
+                <div className="space-y-6">
+                  <div className="space-y-3">
+                    <h5 className="text-[9px] font-bold uppercase text-dim">Características Individuais / Socioeconômicas</h5>
+                    <div className="space-y-1.5">
+                      {GESTATIONAL_RISK_FACTORS.filter(f => f.category === 'socioeconomic').map(f => (
+                        <label key={f.id} className="flex items-center justify-between p-2 hover:bg-surf rounded transition-colors cursor-pointer text-xs">
+                          <div className="flex items-center gap-2">
+                            <input 
+                              type="checkbox" 
+                              checked={state.obsData?.socioeconomicRisk.includes(f.id)}
+                              onChange={() => toggleRiskFactor('socioeconomicRisk', f.id)}
+                              className="rounded border-surf-3 text-rose-500"
+                            />
+                            <span>{f.label}</span>
+                          </div>
+                          <span className="text-[10px] font-mono font-bold text-dim">+{f.score}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <h5 className="text-[9px] font-bold uppercase text-dim">História Reprodutiva Anterior</h5>
+                    <div className="space-y-1.5">
+                      {GESTATIONAL_RISK_FACTORS.filter(f => f.category === 'previousReproductive').map(f => (
+                        <label key={f.id} className="flex items-center justify-between p-2 hover:bg-surf rounded transition-colors cursor-pointer text-xs">
+                          <div className="flex items-center gap-2">
+                            <input 
+                              type="checkbox" 
+                              checked={state.obsData?.previousReproductiveRisk.includes(f.id)}
+                              onChange={() => toggleRiskFactor('previousReproductiveRisk', f.id)}
+                              className="rounded border-surf-3 text-rose-500"
+                            />
+                            <span>{f.label}</span>
+                          </div>
+                          <span className="text-[10px] font-mono font-bold text-dim">+{f.score}</span>
+                        </label>
+                      ))}
+                    </div>
                   </div>
                 </div>
-                <div className="space-y-4">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-dim">🦋 Tireoide</h4>
-                  <div className="grid grid-cols-2 gap-4">
-                    <Input label="TSH (mUI/L)" value={state.obsData?.tirTSH || ''} onChange={v => updateObsData('tirTSH', v)} />
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-mono uppercase tracking-wider text-dim">T4 Livre</label>
-                      <select value={state.obsData?.tirT4L} onChange={e => updateObsData('tirT4L', e.target.value)} className="w-full bg-transparent border-b-2 border-surf-3 py-1 text-sm">
-                        <option value="">Selecione</option>
-                        <option value="normal">Normal</option>
-                        <option value="elevado">Elevado ↑</option>
-                        <option value="reduzido">Reduzido ↓</option>
-                      </select>
+
+                {/* Coluna 2: Intercorrências Atuais e Clínicas Prévias */}
+                <div className="space-y-6">
+                  <div className="space-y-3">
+                    <h5 className="text-[9px] font-bold uppercase text-dim">Intercorrências na Gestação Atual</h5>
+                    <div className="max-h-[300px] overflow-y-auto pr-2 space-y-1.5 scrollbar-thin">
+                      {GESTATIONAL_RISK_FACTORS.filter(f => f.category === 'currentObstetric').map(f => (
+                        <label key={f.id} className="flex items-center justify-between p-2 hover:bg-surf rounded transition-colors cursor-pointer text-xs">
+                          <div className="flex items-center gap-2">
+                            <input 
+                              type="checkbox" 
+                              checked={state.obsData?.currentObstetricRisk.includes(f.id)}
+                              onChange={() => toggleRiskFactor('currentObstetricRisk', f.id)}
+                              className="rounded border-surf-3 text-rose-500"
+                            />
+                            <span>{f.label}</span>
+                          </div>
+                          <span className="text-[10px] font-mono font-bold text-dim">+{f.score}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <h5 className="text-[9px] font-bold uppercase text-dim">Condições Clínicas Prévias</h5>
+                    <div className="space-y-1.5">
+                      {GESTATIONAL_RISK_FACTORS.filter(f => f.category === 'previousClinical').map(f => (
+                        <label key={f.id} className="flex items-center justify-between p-2 hover:bg-surf rounded transition-colors cursor-pointer text-xs">
+                          <div className="flex items-center gap-2">
+                            <input 
+                              type="checkbox" 
+                              checked={state.obsData?.previousClinicalRisk.includes(f.id)}
+                              onChange={() => toggleRiskFactor('previousClinicalRisk', f.id)}
+                              className="rounded border-surf-3 text-rose-500"
+                            />
+                            <span>{f.label}</span>
+                          </div>
+                          <span className="text-[10px] font-mono font-bold text-dim">+{f.score}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Resultado da Estratificação */}
+              <div className={`mt-8 p-6 rounded-2xl border-2 transition-all ${
+                gestationalRisk.level === 'Alto' ? 'bg-rose-500/5 border-rose-500/30' :
+                gestationalRisk.level === 'Médio' ? 'bg-amber-500/5 border-amber-500/30' :
+                'bg-emerald-500/5 border-emerald-500/30'
+              }`}>
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-mono uppercase tracking-widest text-dim">Classificação de Risco</span>
+                    <h3 className={`text-2xl font-serif font-bold ${
+                      gestationalRisk.level === 'Alto' ? 'text-rose-600' :
+                      gestationalRisk.level === 'Médio' ? 'text-amber-600' :
+                      'text-emerald-600'
+                    }`}>
+                      Risco Gestacional {gestationalRisk.level}
+                    </h3>
+                    <p className="text-xs text-dim italic">Pontuação Total: {gestationalRisk.score} pontos</p>
+                  </div>
+                  <div className="flex flex-col items-end gap-1">
+                    <span className="text-[10px] font-mono uppercase tracking-widest text-dim">Fluxo de Atendimento</span>
+                    <div className={`px-4 py-2 rounded-full text-sm font-bold uppercase tracking-wider ${
+                      gestationalRisk.level === 'Alto' ? 'bg-rose-600 text-white' :
+                      gestationalRisk.level === 'Médio' ? 'bg-amber-600 text-white' :
+                      'bg-emerald-600 text-white'
+                    }`}>
+                      {gestationalRisk.flow}
                     </div>
                   </div>
                 </div>
