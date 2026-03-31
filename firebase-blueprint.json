@@ -1,0 +1,64 @@
+{
+  "entities": {
+    "Patient": {
+      "title": "Patient",
+      "description": "Patient identification and basic data",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "dob": { "type": "string", "format": "date" },
+        "age": { "type": "string" },
+        "sex": { "type": "string" },
+        "weight": { "type": "string" },
+        "height": { "type": "string" },
+        "bmi": { "type": "string" },
+        "doctor": { "type": "string" },
+        "date": { "type": "string", "format": "date" }
+      },
+      "required": ["name", "date"]
+    },
+    "Consultation": {
+      "title": "Consultation",
+      "description": "A medical consultation record",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "patient": { "$ref": "Patient" },
+        "soap": {
+          "type": "object",
+          "properties": {
+            "s": { "type": "object" },
+            "o": { "type": "object" },
+            "a": { "type": "string" },
+            "p": { "type": "string" }
+          }
+        },
+        "codes": { "type": "array", "items": { "type": "object" } },
+        "cvData": { "type": "object" },
+        "obsData": { "type": "object" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "patient", "createdAt"]
+    },
+    "User": {
+      "title": "User",
+      "description": "User profile and settings",
+      "type": "object",
+      "properties": {
+        "theme": { "type": "string", "enum": ["light", "dark"] },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/consultations/{consultationId}": {
+      "schema": "Consultation",
+      "description": "Collection of medical consultations"
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile and settings"
+    }
+  }
+}

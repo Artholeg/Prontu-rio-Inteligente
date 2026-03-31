@@ -1,0 +1,5 @@
+{
+  "name": "Prontuário Inteligente",
+  "description": "Sistema de prontuário médico inteligente com SOAP, codificação CIAP-2/CID-10/CID-11 e análise assistida por IA.",
+  "requestFramePermissions": []
+}

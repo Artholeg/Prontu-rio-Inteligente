@@ -1,0 +1,60 @@
+@import "tailwindcss";
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@400;600;700&family=Source+Sans+3:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+@theme {
+  --font-sans: "Source Sans 3", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Playfair Display", serif;
+  --font-mono: "IBM Plex Mono", monospace;
+
+  --color-bg: #f7f7f4;
+  --color-surf: #ffffff;
+  --color-surf-2: #f0eeea;
+  --color-surf-3: #e4e1db;
+  --color-border: #ddd9d1;
+  --color-border-2: #ccc7bc;
+  --color-text: #22201c;
+  --color-text-2: #3d3a34;
+  --color-muted: #7a756b;
+  --color-dim: #a09b91;
+
+  --color-s-clr: #0e7490;
+  --color-s-bg: #ecfeff;
+  --color-o-clr: #6d28d9;
+  --color-o-bg: #f5f3ff;
+  --color-a-clr: #047857;
+  --color-a-bg: #ecfdf5;
+  --color-p-clr: #b45309;
+  --color-p-bg: #fffbeb;
+
+  --color-ciap: #7c3aed;
+  --color-cid10: #0284c7;
+  --color-cid11: #be185d;
+}
+
+@layer base {
+  body {
+    @apply bg-bg text-text transition-colors duration-300;
+  }
+}
+
+.dark {
+  --color-bg: #0c0d11;
+  --color-surf: #16181f;
+  --color-surf-2: #1e2028;
+  --color-surf-3: #282a34;
+  --color-border: #2e3040;
+  --color-border-2: #3a3d50;
+  --color-text: #e8e6e1;
+  --color-text-2: #c4c1ba;
+  --color-muted: #8a8780;
+  --color-dim: #5a5750;
+
+  --color-s-clr: #22d3ee;
+  --color-s-bg: rgba(34,211,238,.06);
+  --color-o-clr: #a78bfa;
+  --color-o-bg: rgba(167,139,250,.06);
+  --color-a-clr: #34d399;
+  --color-a-bg: rgba(52,211,153,.06);
+  --color-p-clr: #fbbf24;
+  --color-p-bg: rgba(251,191,36,.06);
+}
